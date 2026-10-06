@@ -24,13 +24,18 @@ app = FastAPI(
     description=(
         "SOC-grade dashboard and REST API for analyzing "
         "Lab 7.1 Schema ($bsonSize, Embedding vs Referencing) and "
-        "Lab 7.2 Working Set & WiredTiger Cache Telemetry with Live VirusTotal & MalwareBazaar Feeds."
+        "Lab 7.2 Working Set & WiredTiger Cache Telemetry with "
+        "Live VirusTotal & MalwareBazaar Feeds."
     ),
     version="2.1.0"
 )
 
 
-# Enable unrestricted CORS for frontend clients (LiveServer, localhost, 127.0.0.1)
+# ============================================================
+# CORS CONFIGURATION
+# Allows frontend hosted on Vercel, localhost and other clients
+# ============================================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -40,7 +45,10 @@ app.add_middleware(
 )
 
 
-# Register existing API routers
+# ============================================================
+# API ROUTERS
+# ============================================================
+
 app.include_router(reports_router, prefix="/api")
 app.include_router(cache_router, prefix="/api")
 app.include_router(working_set_router, prefix="/api")
@@ -48,14 +56,15 @@ app.include_router(random_read_router, prefix="/api")
 app.include_router(new_reports_router, prefix="/api")
 app.include_router(real_reports_router, prefix="/api")
 
-# Register Lab 7.1, Taxonomy & Live Feed Sync API routers
 app.include_router(lab71_router, prefix="/api")
 app.include_router(taxonomy_router, prefix="/api")
 app.include_router(live_sync_router, prefix="/api")
 app.include_router(ioc_router, prefix="/api")
 
 
-
+# ============================================================
+# HEALTH CHECK
+# ============================================================
 
 @app.get("/api/health")
 def health_check():
@@ -69,7 +78,10 @@ def health_check():
     }
 
 
-# Serve frontend static files if present
+# ============================================================
+# FRONTEND STATIC FILES
+# ============================================================
+
 frontend_dir = os.path.abspath(
     os.path.join(
         os.path.dirname(__file__),
@@ -79,13 +91,29 @@ frontend_dir = os.path.abspath(
 )
 
 if os.path.exists(frontend_dir):
+
     css_dir = os.path.join(frontend_dir, "css")
     js_dir = os.path.join(frontend_dir, "js")
+
     if os.path.exists(css_dir):
-        app.mount("/css", StaticFiles(directory=css_dir), name="css")
+        app.mount(
+            "/css",
+            StaticFiles(directory=css_dir),
+            name="css"
+        )
+
     if os.path.exists(js_dir):
-        app.mount("/js", StaticFiles(directory=js_dir), name="js")
-    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+        app.mount(
+            "/js",
+            StaticFiles(directory=js_dir),
+            name="js"
+        )
+
+    app.mount(
+        "/static",
+        StaticFiles(directory=frontend_dir),
+        name="static"
+    )
 
     @app.get("/")
     def serve_index():
@@ -94,6 +122,9 @@ if os.path.exists(frontend_dir):
         )
 
 
+# ============================================================
+# LOCAL DEVELOPMENT
+# ============================================================
 
 if __name__ == "__main__":
     import uvicorn

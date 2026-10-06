@@ -1,32 +1,69 @@
 /**
  * Threat Intelligence Dashboard - API Service Layer
- * Cleanly separates all data-fetching functions from the UI logic.
- * Automatically discovers active backend port (8080 or 8000) on 127.0.0.1 / localhost.
+ *
+ * Handles all backend API requests.
+ *
+ * Local development:
+ *   http://localhost:8080
+ *   http://localhost:8000
+ *
+ * Production:
+ *   https://threatplus.onrender.com
  */
 
 class ApiService {
   constructor() {
-    const isFastApiDirect = (window.location.protocol.startsWith('http') && (window.location.port === '8080' || window.location.port === '8000'));
-    
-    this.candidateUrls = isFastApiDirect 
-      ? ['', 'http://127.0.0.1:8080', 'http://localhost:8080']
-      : ['http://127.0.0.1:8080', 'http://localhost:8080', 'http://127.0.0.1:8000', 'http://localhost:8000', ''];
-    
+    // Detect whether the frontend is running locally
+    const isLocalhost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
+
+    // Backend URLs
+    if (isLocalhost) {
+      this.candidateUrls = [
+        'http://127.0.0.1:8080',
+        'http://localhost:8080',
+        'http://127.0.0.1:8000',
+        'http://localhost:8000'
+      ];
+    } else {
+      // Production backend on Render
+      this.candidateUrls = [
+        'https://threatplus.onrender.com'
+      ];
+    }
+
     this.activeBaseUrl = null;
   }
 
   /**
-   * Helper method for standard JSON HTTP requests with port failover and error handling
+   * Standard JSON HTTP request helper.
+   *
+   * Automatically uses:
+   *   /api + endpoint
+   *
+   * Example:
+   *   /reports
+   * becomes:
+   *   https://threatplus.onrender.com/api/reports
    */
   async request(endpoint, options = {}) {
     let lastError = null;
-    const urlsToTry = this.activeBaseUrl !== null 
-      ? [this.activeBaseUrl, ...this.candidateUrls.filter(u => u !== this.activeBaseUrl)]
-      : this.candidateUrls;
+
+    const urlsToTry =
+      this.activeBaseUrl !== null
+        ? [
+          this.activeBaseUrl,
+          ...this.candidateUrls.filter(
+            (url) => url !== this.activeBaseUrl
+          )
+        ]
+        : this.candidateUrls;
 
     for (const base of urlsToTry) {
       try {
         const url = `${base}/api${endpoint}`;
+
         const response = await fetch(url, {
           headers: {
             'Content-Type': 'application/json',
@@ -37,41 +74,92 @@ class ApiService {
 
         if (response.ok) {
           this.activeBaseUrl = base;
-          return await response.json();
-        } else {
-          // Parse server JSON error if available
-          let errorMsg = `Request failed with status ${response.status}`;
-          try {
-            const errData = await response.json();
-            if (errData && (errData.detail || errData.message)) {
-              errorMsg = errData.detail || errData.message;
-            }
-          } catch (e) {}
-          this.activeBaseUrl = base;
-          throw new Error(errorMsg);
+
+          // Some endpoints may return an empty response
+          const contentType = response.headers.get('content-type') || '';
+
+          if (contentType.includes('application/json')) {
+            return await response.json();
+          }
+
+          return await response.text();
         }
+
+        // Try to read backend error
+        let errorMsg = `Request failed with status ${response.status}`;
+
+        try {
+          const errData = await response.json();
+
+          if (errData && (errData.detail || errData.message)) {
+            errorMsg = errData.detail || errData.message;
+          }
+        } catch (e) {
+          // Ignore JSON parsing errors
+        }
+
+        this.activeBaseUrl = base;
+
+        throw new Error(errorMsg);
       } catch (err) {
         lastError = err;
-        // If it's an explicit API error returned by backend (not connection failure), throw immediately
-        if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+
+        // If backend explicitly returned an error,
+        // don't continue trying other URLs.
+        if (
+          err.message &&
+          !err.message.includes('fetch') &&
+          !err.message.includes('NetworkError') &&
+          !err.message.includes('Failed to fetch')
+        ) {
           throw err;
         }
       }
     }
 
-    console.warn(`[API Warning] Could not reach backend at /api${endpoint}`);
-    throw (lastError || new Error(`Could not connect to backend server at /api${endpoint}. Please ensure python main.py is running.`));
+    console.warn(
+      `[API Warning] Could not reach backend at /api${endpoint}`
+    );
+
+    throw (
+      lastError ||
+      new Error(
+        `Could not connect to backend server at /api${endpoint}.`
+      )
+    );
   }
 
   /**
    * GET /api/reports
    */
-  async getReports({ search = '', year = '', threatType = '', severity = '', page = 1, limit = 12, sortBy = 'createdAt', order = 'desc' } = {}) {
+  async getReports({
+    search = '',
+    year = '',
+    threatType = '',
+    severity = '',
+    page = 1,
+    limit = 12,
+    sortBy = 'createdAt',
+    order = 'desc'
+  } = {}) {
     const params = new URLSearchParams();
-    if (search) params.append('search', search);
-    if (year) params.append('year', year);
-    if (threatType && threatType !== 'All') params.append('threatType', threatType);
-    if (severity && severity !== 'All') params.append('severity', severity);
+
+    if (search) {
+      params.append('search', search);
+    }
+
+    if (year) {
+      params.append('year', year);
+    }
+
+    if (threatType && threatType !== 'All') {
+      params.append('threatType', threatType);
+    }
+
+    if (severity && severity !== 'All') {
+      params.append('severity', severity);
+    }
+
     params.append('page', page);
     params.append('limit', limit);
     params.append('sort_by', sortBy);
@@ -84,7 +172,9 @@ class ApiService {
    * GET /api/reports/:id
    */
   async getReportById(reportId) {
-    return this.request(`/reports/${encodeURIComponent(reportId)}`);
+    return this.request(
+      `/reports/${encodeURIComponent(reportId)}`
+    );
   }
 
   /**
@@ -97,12 +187,32 @@ class ApiService {
   /**
    * GET /api/ioc
    */
-  async getIocStream({ search = '', feed = '', threatType = '', iocType = '', page = 1, limit = 20 } = {}) {
+  async getIocStream({
+    search = '',
+    feed = '',
+    threatType = '',
+    iocType = '',
+    page = 1,
+    limit = 20
+  } = {}) {
     const params = new URLSearchParams();
-    if (search) params.append('search', search);
-    if (feed && feed !== 'All') params.append('feed', feed);
-    if (threatType && threatType !== 'All') params.append('threatType', threatType);
-    if (iocType && iocType !== 'All') params.append('iocType', iocType);
+
+    if (search) {
+      params.append('search', search);
+    }
+
+    if (feed && feed !== 'All') {
+      params.append('feed', feed);
+    }
+
+    if (threatType && threatType !== 'All') {
+      params.append('threatType', threatType);
+    }
+
+    if (iocType && iocType !== 'All') {
+      params.append('iocType', iocType);
+    }
+
     params.append('page', page);
     params.append('limit', limit);
 
@@ -122,6 +232,7 @@ class ApiService {
   async getWorkingSetAnalysis() {
     return this.request('/working-set');
   }
+
   async getWorkingSet() {
     return this.getWorkingSetAnalysis();
   }
@@ -141,6 +252,7 @@ class ApiService {
       method: 'POST'
     });
   }
+
   async startRandomRead(reads = 500) {
     return this.startRandomReadExperiment(reads);
   }
@@ -160,6 +272,7 @@ class ApiService {
   async getLab71SchemaAnalysis() {
     return this.request('/lab71/schema-analysis');
   }
+
   async getLab71Analysis() {
     return this.getLab71SchemaAnalysis();
   }
@@ -168,10 +281,14 @@ class ApiService {
    * POST /api/lab71/benchmark-redesign
    */
   async benchmarkLab71Redesign(iterations = 100) {
-    return this.request(`/lab71/benchmark-redesign?iterations=${iterations}`, {
-      method: 'POST'
-    });
+    return this.request(
+      `/lab71/benchmark-redesign?iterations=${iterations}`,
+      {
+        method: 'POST'
+      }
+    );
   }
+
   async runRedesignBenchmark(iterations = 100) {
     return this.benchmarkLab71Redesign(iterations);
   }
@@ -250,8 +367,5 @@ class ApiService {
   }
 }
 
+// Make API service globally available
 window.apiService = new ApiService();
-
-
-
-
