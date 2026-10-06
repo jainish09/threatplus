@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThreatPulse - Cyber Threat Intelligence Platform</title>
+  <meta name="description" content="ThreatPulse - Cyber Threat Intelligence SOC Platform, Lab 7.1 Schema Analysis & Lab 7.2 WiredTiger Working Set Monitor">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- TOP NAVBAR -->
+  <header class="top-navbar">
+    <div class="brand-section">
+      <div class="brand-logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+      </div>
+      <div class="brand-text">
+        Threat<span>Pulse</span>
+      </div>
+      <span class="live-badge">
+        <span class="live-dot"></span>
+        LIVE
+      </span>
+    </div>
+
+    <div class="nav-actions">
+      <span class="updated-time" id="digestUpdatedTime">Updated --:-- UTC</span>
+      <button class="btn-header" id="refreshFeedBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+        Refresh
+      </button>
+      <span id="dbStatusBadge" style="font-size:0.76rem; font-weight:600; color:var(--accent-green); padding:4px 10px; border-radius:4px; background:rgba(52,211,153,0.1); border:1px solid rgba(52,211,153,0.25);">
+        ● MongoDB Atlas
+      </span>
+    </div>
+  </header>  <!-- TOP HUD METRICS STRIP (Persistent SOC Telemetry) -->
+  <section class="top-hud-strip">
+    <div class="hud-metric-card">
+      <div class="hud-icon">💾</div>
+      <div class="hud-details">
+        <span class="hud-label">Working Set Size</span>
+        <span class="hud-val" id="barWorkingSet">Loading live telemetry...</span>
+      </div>
+    </div>
+
+    <div class="hud-metric-card">
+      <div class="hud-icon">⚡</div>
+      <div class="hud-details">
+        <span class="hud-label">WiredTiger Cache</span>
+        <span class="hud-val" id="barCacheUsage" style="color:var(--accent-cyan);">1024 MB</span>
+      </div>
+    </div>
+
+    <div class="hud-metric-card">
+      <div class="hud-icon">🎯</div>
+      <div class="hud-details">
+        <span class="hud-label">Cache Hit Ratio</span>
+        <span class="hud-val" id="barHitRatio" style="color:var(--accent-green);">99.8%</span>
+      </div>
+    </div>
+
+    <div class="hud-metric-card">
+      <div class="hud-icon">📏</div>
+      <div class="hud-details">
+        <span class="hud-label">Avg $bsonSize</span>
+        <span class="hud-val" id="barBsonSize">~2.0 KB (<0.02% Limit)</span>
+      </div>
+    </div>
+
+    <div>
+      <button class="btn btn-header btn-sm" id="quickExpBtn" style="color:var(--accent-cyan); border-color:rgba(0,242,254,0.4); font-size:0.76rem;">
+        ⚡ Random Read Benchmark
+      </button>
+    </div>
+  </section>
+
+  <!-- SUB NAVBAR (Tabs) -->
+  <nav class="sub-navbar">
+    <div class="sub-nav-item active" data-tab="feed">
+      Threat Feed
+    </div>
+    <div class="sub-nav-item" data-tab="lab71">
+      Lab 7.1: Schema Analysis <span class="lab-pill-badge">$bsonSize</span>
+    </div>
+    <div class="sub-nav-item" data-tab="lab72">
+      Lab 7.2: WiredTiger &amp; Working Set <span class="lab-pill-badge">Working Set</span>
+    </div>
+    <div class="sub-nav-item" data-tab="sources">
+      Sources
+    </div>
+    <div class="sub-nav-item" data-tab="ioc">
+      IOC Database
+    </div>
+    <div class="sub-nav-item" data-tab="vtscan">
+      VirusTotal scan <span class="lab-pill-badge" style="background:rgba(0,242,254,0.15); color:var(--accent-cyan); border-color:rgba(0,242,254,0.3);">Live API</span>
+    </div>
+    <div class="sub-nav-item" data-tab="verifier">
+      Threat Verifier <span class="lab-pill-badge" style="background:rgba(16,185,129,0.15); color:#10b981; border-color:rgba(16,185,129,0.3);">Instant Truth</span>
+    </div>
+  </nav>
+
+
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="container">
+
+    <!-- TAB 1: NEWS FEED (Modern 2-Column SOC Workspace) -->
+    <section id="tab-feed" class="tab-pane active">
+      <div class="soc-workspace">
+
+        <!-- LEFT SIDEBAR (Control Station) -->
+        <aside class="soc-sidebar">
+
+          <!-- Search Block -->
+          <div>
+            <div class="sidebar-block-title">
+              <span>Search Intelligence</span>
+            </div>
+            <div class="sidebar-search-box">
+              <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="text" id="feedSearchInput" class="sidebar-search-input" placeholder="Search threats, CVEs, IOCs...">
+            </div>
+          </div>
+
+          <!-- Categories Vertical List -->
+          <div>
+            <div class="sidebar-block-title">
+              <span>Taxonomy Categories</span>
+              <span style="font-size:0.68rem; color:var(--accent-cyan);">11 Types</span>
+            </div>
+            <div class="sidebar-category-list" id="categoryNavList">
+              <button class="cat-nav-btn active" data-cat="All">
+                <span>🌐 All Intelligence</span>
+                <span class="cat-count-badge" id="badgeCountAll">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Threat-Actors">
+                <span>🎭 Threat-Actors</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Vulnerabilities">
+                <span>🛡️ Vulnerabilities</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Ransomware">
+                <span>🔒 Ransomware</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Patches">
+                <span>🩹 Patches</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Malware">
+                <span>🦠 Malware</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Government">
+                <span>🏛️ Government</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Mobile">
+                <span>📱 Mobile</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Cloud">
+                <span>☁️ Cloud</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="IoT">
+                <span>📡 IoT</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Cryptography">
+                <span>🔑 Cryptography</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+              <button class="cat-nav-btn" data-cat="Compromised">
+                <span>⚠️ Compromised</span>
+                <span class="cat-count-badge">...</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Publisher / Source Filter -->
+          <div>
+            <div class="sidebar-block-title">
+              <span>Source Feed</span>
+            </div>
+            <select id="feedSourceDropdown" class="sidebar-select">
+              <option value="">All Verified Sources</option>
+              <option value="CIRCL">CIRCL OSINT Feed</option>
+              <option value="ThreatFox">abuse.ch ThreatFox</option>
+              <option value="URLhaus">abuse.ch URLhaus</option>
+              <option value="CISA">CISA KEV Catalog</option>
+              <option value="MITRE">MITRE ATT&CK Enterprise</option>
+              <option value="Botvrij">Botvrij.eu OSINT</option>
+            </select>
+          </div>
+
+          <!-- Timeline Filter -->
+          <div>
+            <div class="sidebar-block-title">
+              <span>Timeline</span>
+            </div>
+            <select id="feedYearDropdown" class="sidebar-select">
+              <option value="">All Time</option>
+              <option value="2026">2026 Telemetry</option>
+              <option value="2025">2025 Telemetry</option>
+              <option value="2024">2024 Telemetry</option>
+              <option value="2023">2023 Telemetry</option>
+            </select>
+          </div>
+
+          <!-- Severity Filter Chips -->
+          <div>
+            <div class="sidebar-block-title">
+              <span>Severity Level</span>
+            </div>
+            <div class="severity-filter-group" id="sevFilterGroup">
+              <div class="sev-chip" data-sev="All">All</div>
+              <div class="sev-chip" data-sev="Critical">Critical</div>
+              <div class="sev-chip" data-sev="High">High</div>
+              <div class="sev-chip" data-sev="Medium">Medium</div>
+              <div class="sev-chip" data-sev="Low">Low</div>
+            </div>
+          </div>
+
+          <!-- Reset Filter Button -->
+          <button class="btn-reset-filters" id="resetFiltersBtn">
+            ↺ Reset All Filters
+          </button>
+
+        </aside>
+
+        <!-- RIGHT MAIN STAGE -->
+        <div class="soc-stage">
+
+          <!-- LIVE CTI INGESTION & VERIFIED SOURCE HUB (VIRUSTOTAL & MALWAREBAZAAR) -->
+          <div class="live-sync-panel">
+            <div class="sync-header-row">
+              <div class="sync-title-box">
+                <div class="sync-title-icon">⚡</div>
+                <div class="sync-title-text">
+                  <h3>Live Cyber Threat Intelligence Ingestion &amp; OSINT Streams</h3>
+                  <p>Real-time threat telemetry ingestion direct to MongoDB Atlas with verified provenance links</p>
+                </div>
+              </div>
+
+              <div class="sync-pills-row">
+                <span class="sync-status-pill">
+                  ● abuse.ch (URLhaus &amp; ThreatFox)
+                </span>
+                <span class="sync-status-pill" style="border-color:rgba(245,158,11,0.4); color:#fbbf24;">
+                  ● CISA KEV &amp; MITRE
+                </span>
+                <span class="sync-status-pill vt">
+                  ● CIRCL &amp; Botvrij
+                </span>
+                <span id="liveIngestCountBadge" class="sync-status-pill" style="background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.2); color:#fff;">
+                  💾 11,818 Real Reports in MongoDB
+                </span>
+              </div>
+            </div>
+
+            <div class="sync-actions-row">
+              <div class="sync-btn-group">
+                <button class="btn-sync primary" id="btnSyncAllLive">
+                  ⚡ Ingest All Live Feeds
+                </button>
+                <button class="btn-sync" id="btnSyncMalwareBazaar">
+                  🦠 Sync MalwareBazaar Samples
+                </button>
+                <button class="btn-sync" id="btnSyncVirusTotal">
+                  🛡️ Sync VirusTotal Intel
+                </button>
+              </div>
+
+              <!-- VirusTotal On-Demand Investigator -->
+              <form class="sync-investigator-form" id="vtInvestigatorForm" onsubmit="return false;">
+                <input type="text" id="vtTargetInput" class="sync-investigator-input" placeholder="IP / Domain / Hash (e.g. 185.220.101.5)">
+                <button type="submit" class="btn-sync primary" id="btnVtInvestigate" style="padding:4px 10px; font-size:0.72rem;">
+                  🔍 Live VT Inspect
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Stage Toolbar -->
+          <div class="stage-toolbar">
+            <div class="active-filters-row" id="activeFilterTags">
+              <span class="active-filter-tag" id="tagActiveCategory">
+                Category: <strong>All</strong>
+              </span>
+            </div>
+
+
+            <div class="stage-actions">
+              <!-- Sort Dropdown -->
+              <select id="feedSortDropdown" class="sidebar-select" style="width: auto;">
+                <option value="createdAt-desc">Newest First</option>
+                <option value="createdAt-asc">Oldest First</option>
+                <option value="year-desc">Year (2026-2023)</option>
+              </select>
+
+              <!-- View Switcher -->
+              <div class="view-switcher">
+                <button class="view-btn active" id="viewGridBtn" title="3-Column Grid View">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h4v4H4zm6 0h4v4h-4zm6 0h4v4h-4zM4 10h4v4H4zm6 0h4v4h-4zm6 0h4v4h-4zM4 16h4v4H4zm6 0h4v4h-4zm6 0h4v4h-4z"/></svg>
+                </button>
+                <button class="view-btn" id="viewListBtn" title="SOC Stream List View">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+                </button>
+              </div>
+
+              <!-- Article Count -->
+              <span class="article-count-label" id="articleCountLabel">
+                100,000 articles
+              </span>
+            </div>
+          </div>
+
+          <!-- 3-Column Threat Article Card Grid -->
+          <div class="feed-grid" id="feedGrid">
+            <!-- Injected via JavaScript -->
+          </div>
+
+          <!-- Pagination -->
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+            <span style="font-size:0.84rem; color:var(--text-muted);" id="feedPageInfo">Page 1 of 10,000</span>
+            <div style="display:flex; gap:10px;">
+              <button id="feedPrevBtn" class="btn btn-header" disabled>Previous</button>
+              <button id="feedNextBtn" class="btn btn-header">Next</button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 2: LAB 7.1 SCHEMA ANALYSIS & $bsonSize -->
+    <section id="tab-lab71" class="tab-pane">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Lab 7.1: Production Schema Analysis ($bsonSize)</h2>
+            <p style="font-size:0.82rem; color:var(--text-secondary); margin-top:4px;">
+              Examine embedding vs referencing decisions &amp; verify MongoDB 16 MB limit compliance.
+            </p>
+          </div>
+          <button class="btn btn-header" id="btnRecalcBson">Recalculate $bsonSize</button>
+        </div>
+
+        <!-- $bsonSize Aggregation Statistics -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Average Document Size</div>
+            <div class="stat-value" id="lab71AvgSize">2.02 KB</div>
+            <div class="stat-subtext" id="lab71AvgPercent">~0.0129% of 16 MB Limit</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-label">Maximum Document Size</div>
+            <div class="stat-value" id="lab71MaxSize">2.11 KB</div>
+            <div class="stat-subtext">Safe (&lt; 0.02% of limit)</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-label">Minimum Document Size</div>
+            <div class="stat-value" id="lab71MinSize">1.88 KB</div>
+            <div class="stat-subtext">Optimized BSON padding</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-label">16 MB Limit Compliance</div>
+            <div class="stat-value" style="color:var(--accent-green);">PASSED</div>
+            <div class="stat-subtext">Zero document unbounded growth</div>
+          </div>
+        </div>
+
+        <!-- Embedding vs Referencing Decision Matrix Table -->
+        <h3 style="font-size:1rem; font-weight:600; margin-bottom:12px; color:#fff;">Embedding vs Referencing Decisions</h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Relationship</th>
+              <th>Pattern Used</th>
+              <th>Document / Model</th>
+              <th>Design Rationale</th>
+            </tr>
+          </thead>
+          <tbody id="schemaDecisionsBody">
+            <!-- Populated via JavaScript -->
+          </tbody>
+        </table>
+
+        <!-- Lab 7.1 Activity: Try It Yourself Redesign Benchmark -->
+        <div class="benchmark-box">
+          <h3 style="font-size:0.96rem; font-weight:700; color:var(--text-primary);">Activity 7.1: Redesign Referenced Sources as Embedded Design</h3>
+          <p style="font-size:0.82rem; color:var(--text-secondary); margin:6px 0 16px 0;">
+            Compare query execution times: Referenced Design (Normalized Sources Collection + $lookup) vs Embedded Design (Denormalized inside Threat Report).
+          </p>
+
+          <button class="btn btn-primary" id="btnRunBenchmark">
+            ⚡ Run Performance Benchmark
+          </button>
+
+          <div class="benchmark-results-grid" id="benchmarkResultsGrid" style="display:none;">
+            <div class="bench-card">
+              <div class="bench-title">Referenced Model ($lookup join)</div>
+              <div class="bench-time" id="benchReferencedTime">-- ms</div>
+              <p style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;">Requires multi-collection index scan &amp; memory join pipeline.</p>
+            </div>
+
+            <div class="bench-card">
+              <div class="bench-title">Embedded Model (Single Doc Read)</div>
+              <div class="bench-time" id="benchEmbeddedTime" style="color:var(--pastel-green-text);">-- ms</div>
+              <p style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;">Zero joins. 100% single-seek latency.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: LAB 7.2 WIREDTIGER & WORKING SET MONITOR (Comparison System) -->
+    <section id="tab-lab72" class="tab-pane">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Lab 7.2: WiredTiger Cache &amp; Working Set Comparison Analysis</h2>
+            <p style="font-size:0.82rem; color:var(--text-secondary); margin-top:4px;">
+              Observe eviction rates, random read penalties, and memory headroom comparison under 100k documents working set.
+            </p>
+          </div>
+          <button class="btn btn-primary" id="btnStartRandomRead">
+            ▶ Launch Random Read Load (500 Ops)
+          </button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label" id="lab72DocCountLabel">Total Working Set (13,105 Events)</div>
+            <div class="stat-value" id="lab72WorkingSet" style="color:#ea580c;">20.55 MB</div>
+            <div class="stat-subtext">Active uncompressed data footprint</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-label">WiredTiger Cache Max</div>
+            <div class="stat-value" id="lab72CacheMax">1,024 MB</div>
+            <div class="stat-subtext">50% of Host RAM Limit</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-label">Resident In Cache</div>
+            <div class="stat-value" id="lab72CacheUsed" style="color:#10b981;">65.55 MB</div>
+            <div class="stat-subtext" id="lab72CachePercent">6.4% of Max Cache Capacity</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-label">Working Set In Cache Ratio</div>
+            <div class="stat-value" id="lab72RatioValue" style="color:#10b981;">100% In-Memory</div>
+            <div class="stat-subtext" id="lab72RatioSubtext">Working set fits comfortably in RAM</div>
+          </div>
+        </div>
+
+        <!-- Visual Memory Comparison Bar -->
+        <div style="background:rgba(10,15,26,0.6); border:1px solid var(--border-card); border-radius:12px; padding:20px; margin-bottom:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <span style="font-size:0.82rem; font-weight:800; color:#f8fafc; text-transform:uppercase; letter-spacing:0.5px;">Memory Allocation &amp; Capacity Comparison</span>
+            <span style="font-size:0.8rem; font-family:var(--font-mono); color:#10b981; font-weight:700;" id="comparisonRatioText">Working Set (20.55 MB) &lt; WiredTiger Max Cache (1,024 MB) — 100% In-Memory Safe</span>
+          </div>
+          <div style="height:22px; background:rgba(0,0,0,0.4); border-radius:8px; overflow:hidden; display:flex; position:relative; border:1px solid var(--border-card);">
+            <div id="barResidentCache" style="width:6.4%; background:linear-gradient(90deg, #10b981, #06b6d4); transition:width 0.5s;" title="Resident in Cache (~65.5 MB)"></div>
+            <div id="barRemainingWS" style="width:0%; background:rgba(245, 158, 11, 0.4);" title="Remaining Working Set (0 MB)"></div>
+            <div style="flex:1; background:transparent;" title="Available Cache Headroom (958.45 MB)"></div>
+          </div>
+          <div style="display:flex; gap:20px; margin-top:12px; font-size:0.76rem; flex-wrap:wrap; font-weight:600;">
+            <span style="display:flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; background:#10b981; border-radius:3px;"></span> <span id="legendResidentText">Resident in Cache (65.55 MB / 6.4%)</span></span>
+            <span style="display:flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; background:#f59e0b; border-radius:3px;"></span> <span id="legendWsText">Working Set Total (20.55 MB / 2.0%)</span></span>
+            <span style="display:flex; align-items:center; gap:6px;"><span style="width:12px; height:12px; background:#64748b; border-radius:3px;"></span> <span id="legendHeadroomText">Free Cache Headroom (958.45 MB / 93.6%)</span></span>
+          </div>
+        </div>
+
+        <!-- Live WiredTiger Cache Multi-Series Comparison Line Chart -->
+        <div style="background:rgba(10,15,26,0.6); border:1px solid var(--border-card); border-radius:12px; padding:22px; margin-bottom:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+            <div>
+              <h3 style="font-size:1rem; font-weight:800; color:#f8fafc;">Live WiredTiger Telemetry &amp; Comparison Stream</h3>
+              <p style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">Comparing Resident Cache vs Working Set Footprint vs 1024 MB Upper Threshold</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <span class="lab-pill-badge" style="background:rgba(16,185,129,0.15); color:#10b981; border-color:rgba(16,185,129,0.3);">● Resident Cache</span>
+              <span class="lab-pill-badge" style="background:rgba(245,158,11,0.15); color:#fbbf24; border-color:rgba(245,158,11,0.3);">-- Working Set (20.55 MB)</span>
+              <span class="lab-pill-badge" style="background:rgba(244,63,94,0.15); color:#fb7185; border-color:rgba(244,63,94,0.3);">-- Max Cache (1024 MB)</span>
+            </div>
+          </div>
+          <div style="position:relative; height:280px; width:100%;">
+            <canvas id="cacheChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Working Set Sizing Comparison Matrix -->
+        <div style="background:rgba(10,15,26,0.6); border:1px solid var(--border-card); border-radius:12px; padding:20px; margin-bottom:20px;">
+          <h3 style="font-size:0.94rem; font-weight:700; color:#ffffff; margin-bottom:14px;">Working Set Sizing: Scenario Comparison Matrix</h3>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div style="background:rgba(17,24,39,0.8); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:16px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong style="color:#10b981; font-size:0.86rem;">Scenario 1: Working Set &lt; Cache (Current State)</strong>
+                <span style="font-size:0.7rem; background:rgba(16,185,129,0.2); color:#34d399; padding:2px 6px; border-radius:4px; font-weight:700;">OPTIMAL</span>
+              </div>
+              <ul style="font-size:0.78rem; color:var(--text-secondary); line-height:1.6; padding-left:18px;">
+                <li><strong>Working Set:</strong> ~20.55 MB (13,105 events) fits entirely within 1,024 MB cache.</li>
+                <li><strong>Disk I/O:</strong> 0 page swaps during random lookups.</li>
+                <li><strong>Latency:</strong> Ultra-low (~0.84 ms / read).</li>
+                <li><strong>Eviction Penalty:</strong> None. WiredTiger LRU remains idle.</li>
+              </ul>
+            </div>
+
+            <div style="background:rgba(17,24,39,0.8); border:1px solid rgba(244,63,94,0.3); border-radius:8px; padding:16px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong style="color:#fb7185; font-size:0.86rem;">Scenario 2: Working Set &gt; Cache (Cache Thrashing)</strong>
+                <span style="font-size:0.7rem; background:rgba(244,63,94,0.2); color:#fb7185; padding:2px 6px; border-radius:4px; font-weight:700;">BOTTLENECK</span>
+              </div>
+              <ul style="font-size:0.78rem; color:var(--text-secondary); line-height:1.6; padding-left:18px;">
+                <li><strong>Working Set:</strong> E.g., 2,000 MB exceeds 1,024 MB cache.</li>
+                <li><strong>Disk I/O:</strong> High random disk seeks on every query miss.</li>
+                <li><strong>Latency:</strong> 10x-50x spike due to NVMe/EBS disk reads.</li>
+                <li><strong>Eviction Penalty:</strong> High eviction loops and CPU load.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Random Read Experiment Console Output -->
+        <div style="background:rgba(10,15,26,0.6); border:1px solid var(--border-card); border-radius:12px; padding:20px;">
+          <h3 style="font-size:0.92rem; font-weight:700; color:#ffffff; margin-bottom:10px;">Random Read Experiment Status</h3>
+          <div id="experimentOutput" style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-secondary); line-height:1.6;">
+            Experiment idle. Click "Launch Random Read Load (500 Ops)" to execute random seeks across all 13,105 event documents and observe cache hit ratio.
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 4: SOURCES -->
+    <section id="tab-sources" class="tab-pane">
+      <div class="panel">
+        <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h2 class="panel-title">Cyber Threat Intelligence Feed Sources &amp; Live APIs</h2>
+            <p style="font-size:0.8rem; color:var(--text-secondary); margin-top:3px;">
+              Integrated threat intelligence feeds, live malware registries, and multi-engine telemetry providers.
+            </p>
+          </div>
+          <button class="btn btn-header btn-sm" id="btnSyncAllSources" style="color:var(--accent-cyan); border-color:rgba(0,242,254,0.4);">
+            ⚡ Sync All Live Sources
+          </button>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Source Provider</th>
+              <th>Category / Intelligence Type</th>
+              <th>Authentication / Protocol</th>
+              <th>Verified Source URL</th>
+              <th>Ingested Records</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background:rgba(239,68,68,0.05);">
+              <td><strong>abuse.ch URLhaus</strong></td>
+              <td>Live Malware Payloads, Phishing &amp; C2 Distribution</td>
+              <td>REST API &amp; Automated JSON Feed</td>
+              <td><a href="https://urlhaus.abuse.ch/" target="_blank" style="color:#f87171;">urlhaus.abuse.ch</a></td>
+              <td><span style="font-family:var(--font-mono); color:#fff; font-weight:600;">5,000 Events</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Live Connected</span></td>
+            </tr>
+            <tr style="background:rgba(0,242,254,0.05);">
+              <td><strong>abuse.ch ThreatFox</strong></td>
+              <td>High-Confidence Malware IOCs &amp; Botnet Domains</td>
+              <td>MISP Feed &amp; REST API (abuse.ch)</td>
+              <td><a href="https://threatfox.abuse.ch/" target="_blank" style="color:var(--accent-cyan);">threatfox.abuse.ch</a></td>
+              <td><span style="font-family:var(--font-mono); color:#fff; font-weight:600;">2,010 Events</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Live Connected</span></td>
+            </tr>
+            <tr style="background:rgba(245,158,11,0.05);">
+              <td><strong>CISA KEV Catalog</strong></td>
+              <td>US Federal Zero-Day Vulnerabilities &amp; Exploits</td>
+              <td>CISA Automated JSON Feed</td>
+              <td><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" style="color:#fbbf24;">cisa.gov/kev-catalog</a></td>
+              <td><span style="font-family:var(--font-mono); color:#fff; font-weight:600;">1,734 CVEs</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Live Connected</span></td>
+            </tr>
+            <tr style="background:rgba(59,130,246,0.05);">
+              <td><strong>CIRCL OSINT Feed</strong></td>
+              <td>European CERT/CIRCL Incident &amp; APT Telemetry</td>
+              <td>MISP Feed over HTTPS (manifest.json)</td>
+              <td><a href="https://www.circl.lu/doc/misp/feed-osint/" target="_blank" style="color:#60a5fa;">circl.lu/doc/misp/feed-osint</a></td>
+              <td><span style="font-family:var(--font-mono); color:#fff; font-weight:600;">1,681 Events</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Live Connected</span></td>
+            </tr>
+            <tr style="background:rgba(168,85,247,0.05);">
+              <td><strong>MITRE ATT&amp;CK Matrix</strong></td>
+              <td>Global Adversary Profiling, APT Groups &amp; Tactics</td>
+              <td>OASIS STIX 2.1 JSON Repository</td>
+              <td><a href="https://attack.mitre.org/" target="_blank" style="color:#c084fc;">attack.mitre.org</a></td>
+              <td><span style="font-family:var(--font-mono); color:#fff; font-weight:600;">962 Profiles</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Live Connected</span></td>
+            </tr>
+            <tr style="background:rgba(16,185,129,0.05);">
+              <td><strong>Botvrij.eu OSINT Feed</strong></td>
+              <td>Open Source Threat Intelligence &amp; Network Telemetry</td>
+              <td>MISP Feed over HTTPS</td>
+              <td><a href="https://www.botvrij.eu/data/feed-osint/" target="_blank" style="color:#34d399;">botvrij.eu/data/feed-osint</a></td>
+              <td><span style="font-family:var(--font-mono); color:#fff; font-weight:600;">435 Events</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Live Connected</span></td>
+            </tr>
+            <tr>
+              <td><strong>MISP Galaxy Clusters</strong></td>
+              <td>Threat Actors, Malpedia Malware &amp; Adversary Tools</td>
+              <td>MISP Galaxy Cluster Taxonomy</td>
+              <td><a href="https://github.com/MISP/misp-galaxy" target="_blank" style="color:var(--text-muted);">github.com/MISP/misp-galaxy</a></td>
+              <td><span style="font-family:var(--font-mono); color:var(--text-muted);">8,225 Entities</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Active</span></td>
+            </tr>
+            <tr>
+              <td><strong>VirusTotal API v3</strong></td>
+              <td>Multi-Engine Threat Telemetry, IP/Domain/Hash Inspector</td>
+              <td>REST API v3 (<code>x-apikey</code> Header)</td>
+              <td><a href="https://www.virustotal.com" target="_blank" style="color:var(--accent-cyan);">virustotal.com/gui</a></td>
+              <td><span style="font-family:var(--font-mono); color:var(--text-muted);">On-Demand</span></td>
+              <td><span style="color:var(--accent-green); font-weight:700;">● Live Connected</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB 5: IOC DATABASE -->
+    <section id="tab-ioc" class="tab-pane">
+      <div class="panel">
+        <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2 class="panel-title">Authentic Indicators of Compromise (IOC) Stream</h2>
+            <p style="font-size:0.8rem; color:var(--text-secondary); margin-top:3px;">
+              Live stream of verified malicious IPs, domains, hashes, malware URLs, and CVEs ingested from connected threat intelligence feeds.
+            </p>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span id="iocTotalCountBadge" style="font-family:var(--font-mono); font-size:0.75rem; color:var(--accent-cyan); background:rgba(0,242,254,0.1); border:1px solid rgba(0,242,254,0.25); padding:4px 10px; border-radius:12px;">
+              Loading IOCs...
+            </span>
+          </div>
+        </div>
+
+        <!-- Filter & Search Bar for IOCs -->
+        <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; background:rgba(10,15,26,0.6); padding:12px; border-radius:8px; border:1px solid var(--border-card);">
+          <input type="text" id="iocSearchInput" placeholder="🔍 Search Observable IP, Domain, Hash, CVE, or Report ID..." style="flex:1; min-width:240px; background:var(--bg-input); border:1px solid var(--border-input); color:#fff; padding:7px 12px; border-radius:6px; font-size:0.82rem; outline:none;" />
+          
+          <select id="iocTypeFilter" style="background:var(--bg-input); border:1px solid var(--border-input); color:var(--text-secondary); padding:7px 12px; border-radius:6px; font-size:0.82rem; outline:none;">
+            <option value="All">All Observable Types</option>
+            <option value="ip">IP Addresses (C2 / Malicious Hosts)</option>
+            <option value="domain">Domains &amp; Hostnames</option>
+            <option value="url">Malware Payloads / URLs</option>
+            <option value="hash">Cryptographic Hashes (SHA-256 / MD5)</option>
+            <option value="cve">CVE Vulnerabilities</option>
+          </select>
+
+          <select id="iocFeedFilter" style="background:var(--bg-input); border:1px solid var(--border-input); color:var(--text-secondary); padding:7px 12px; border-radius:6px; font-size:0.82rem; outline:none;">
+            <option value="All">All Ingested Feeds</option>
+            <option value="URLhaus">abuse.ch URLhaus</option>
+            <option value="ThreatFox">abuse.ch ThreatFox</option>
+            <option value="CIRCL">CIRCL OSINT Feed</option>
+            <option value="Botvrij">Botvrij.eu OSINT Feed</option>
+            <option value="VirusTotal">VirusTotal API v3</option>
+            <option value="CISA">CISA KEV Catalog</option>
+          </select>
+
+          <button id="iocRefreshBtn" class="btn btn-sm" style="background:rgba(0,242,254,0.15); color:var(--accent-cyan); border:1px solid rgba(0,242,254,0.3); padding:7px 14px; border-radius:6px; font-size:0.82rem; cursor:pointer;">
+            ↻ Refresh Stream
+          </button>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:140px;">Report / Event ID</th>
+                <th style="width:180px;">Source Feed &amp; Provenance</th>
+                <th style="width:130px;">Threat Category</th>
+                <th>Observable (IP / Domain / URL / CVE)</th>
+                <th style="width:210px;">Authentic Hash (SHA256 / MD5)</th>
+                <th style="width:200px;">MITRE ATT&amp;CK</th>
+              </tr>
+            </thead>
+            <tbody id="iocTableBody">
+              <!-- Populated dynamically with real data -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:12px; border-top:1px solid var(--border-card);">
+          <button id="iocPrevPageBtn" class="btn btn-sm" style="background:rgba(255,255,255,0.05); color:var(--text-secondary); border:1px solid var(--border-card); padding:5px 12px; border-radius:6px; font-size:0.8rem; cursor:pointer;">
+            &larr; Previous
+          </button>
+          <span id="iocPageIndicator" style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-secondary);">
+            Page 1 of 1
+          </span>
+          <button id="iocNextPageBtn" class="btn btn-sm" style="background:rgba(255,255,255,0.05); color:var(--text-secondary); border:1px solid var(--border-card); padding:5px 12px; border-radius:6px; font-size:0.8rem; cursor:pointer;">
+            Next &rarr;
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 6: VIRUSTOTAL SCAN (Real-Time Multi-Engine Scanner & Cached Database) -->
+    <section id="tab-vtscan" class="tab-pane">
+      <div class="vt-scan-workspace">
+        <div class="vt-scan-header">
+          <h2 class="vt-scan-title">VirusTotal scan</h2>
+          <p class="vt-scan-desc">
+            Check one IP address, domain, URL or file hash against more than 90 antivirus engines. Each result is saved for 24 hours and linked to the threats it belongs to, so the next lookup is instant.
+          </p>
+        </div>
+
+        <!-- Big Command Bar -->
+        <form class="vt-scan-bar-container" id="vtScanPageForm" onsubmit="return false;">
+          <div class="vt-scan-prefix">vt scan</div>
+          <input type="text" id="vtScanPageInput" class="vt-scan-bar-input" placeholder="185.220.101.1  |  evil.example  |  https://...  |  sha256" autocomplete="off" spellcheck="false" />
+          <button type="submit" id="vtScanPageBtn" class="vt-scan-submit-btn">
+            Scan
+          </button>
+        </form>
+
+        <!-- Live Scan Result Card / Alert (Shows details upon scan) -->
+        <div id="vtScanResultBanner" style="display:none; margin-bottom: 24px;"></div>
+
+        <!-- Recent Scans Table Card -->
+        <div class="panel" style="padding: 24px; border-radius: 12px; background: rgba(10, 15, 26, 0.75);">
+          <div class="panel-header" style="border-bottom: 1px solid var(--border-card); padding-bottom: 14px; margin-bottom: 18px; display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap: 8px;">
+              <span style="font-size: 0.96rem; font-weight: 700; color: #ffffff;">Recent scans</span>
+              <span style="color: var(--text-muted); font-size: 0.85rem;">·</span>
+              <span id="vtScansCountLabel" style="color: var(--text-muted); font-size: 0.85rem; font-family: var(--font-mono);">7 cached</span>
+            </div>
+            <button id="vtRefreshScansBtn" class="btn btn-sm" style="background: rgba(0, 242, 254, 0.1); color: var(--accent-cyan); border: 1px solid rgba(0, 242, 254, 0.25); font-size: 0.78rem; padding: 4px 12px; border-radius: 6px; cursor: pointer;">
+              ↻ Refresh
+            </button>
+          </div>
+
+          <div style="overflow-x: auto;">
+            <table class="data-table vt-scans-table">
+              <thead>
+                <tr>
+                  <th style="width: 30%;">Indicator</th>
+                  <th style="width: 10%;">Type</th>
+                  <th style="width: 15%;">Verdict</th>
+                  <th style="width: 10%;">Country</th>
+                  <th style="width: 20%;">Owner</th>
+                  <th style="width: 15%; text-align: right;">Scanned</th>
+                </tr>
+              </thead>
+              <tbody id="vtScansTableBody">
+                <!-- Populated dynamically via JavaScript -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Footer Caption -->
+        <div class="vt-scan-footer-meta">
+          <p>Threat events from CIRCL, Botvrij.eu, abuse.ch ThreatFox and selected research publishers, checked against annual security reports.</p>
+          <p id="vtLastUpdatedMeta">Data last updated 6 Oct 2026 at 14:38.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 7: THREAT & IOC VERIFIER (Instant Truth Engine) -->
+    <section id="tab-verifier" class="tab-pane">
+      <div class="vt-scan-workspace">
+        <div class="vt-scan-header">
+          <h2 class="vt-scan-title" style="display:flex; align-items:center; gap:10px;">
+            <span>Threat &amp; IOC Verification Engine</span>
+            <span class="lab-pill-badge" style="background:rgba(16,185,129,0.15); color:#10b981; border-color:rgba(16,185,129,0.3); font-size:0.75rem;">Verified vs Not Verified</span>
+          </h2>
+          <p class="vt-scan-desc">
+            Instantly cross-check any IP address, domain, URL, file hash (SHA256/MD5), CVE vulnerability, or report ID against <strong>13,105 authentic verified threat events in MongoDB Atlas</strong>.
+          </p>
+        </div>
+
+        <!-- Verification Search Bar -->
+        <form class="vt-scan-bar-container" id="verifierForm" onsubmit="return false;" style="border-color: rgba(16,185,129,0.35);">
+          <div class="vt-scan-prefix" style="background: rgba(16,185,129,0.2); color: #34d399; border-right-color: rgba(16,185,129,0.3);">verify</div>
+          <input type="text" id="verifierInput" class="vt-scan-bar-input" placeholder="Paste IP, Domain, Hash, URL, CVE, Report ID (e.g. 185.220.101.1, CVE-2024-3400)..." autocomplete="off" spellcheck="false" />
+          <button type="submit" id="verifierBtn" class="vt-scan-submit-btn" style="background: linear-gradient(135deg, #10b981, #059669); color:#fff;">
+            Verify Target
+          </button>
+        </form>
+
+        <!-- Quick Sample Chips -->
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:24px; flex-wrap:wrap;">
+          <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Quick Test:</span>
+          <button type="button" class="btn btn-sm verifier-quick-chip" data-sample="185.220.101.1" style="background:rgba(255,255,255,0.05); color:var(--text-secondary); border:1px solid var(--border-card); font-size:0.75rem; padding:3px 10px; border-radius:6px; cursor:pointer;">
+            🟢 185.220.101.1 (Verified IP)
+          </button>
+          <button type="button" class="btn btn-sm verifier-quick-chip" data-sample="CVE-2024-3400" style="background:rgba(255,255,255,0.05); color:var(--text-secondary); border:1px solid var(--border-card); font-size:0.75rem; padding:3px 10px; border-radius:6px; cursor:pointer;">
+            🟢 CVE-2024-3400 (Verified CVE)
+          </button>
+          <button type="button" class="btn btn-sm verifier-quick-chip" data-sample="VT-IP-185-220-101-1" style="background:rgba(255,255,255,0.05); color:var(--text-secondary); border:1px solid var(--border-card); font-size:0.75rem; padding:3px 10px; border-radius:6px; cursor:pointer;">
+            🟢 VT-IP-185-220-101-1 (Report ID)
+          </button>
+          <button type="button" class="btn btn-sm verifier-quick-chip" data-sample="192.168.1.99" style="background:rgba(255,255,255,0.05); color:var(--text-secondary); border:1px solid var(--border-card); font-size:0.75rem; padding:3px 10px; border-radius:6px; cursor:pointer;">
+            🔴 192.168.1.99 (Unverified)
+          </button>
+        </div>
+
+        <!-- Live Verification Result Container -->
+        <div id="verifierResultContainer" style="display:none; margin-bottom: 24px;"></div>
+
+        <!-- Verification History & Audit Reference Card -->
+        <div class="vt-recent-scans-card">
+          <div class="vt-scans-header">
+            <div>
+              <h3 style="font-size: 0.96rem; font-weight: 700; color: #fff;">Verification Engine Architecture &amp; Data Sources</h3>
+              <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                Verified status is cryptographically matched against authentic MongoDB Atlas collections.
+              </p>
+            </div>
+            <span style="color: #10b981; font-size: 0.82rem; font-family: var(--font-mono); font-weight: 700;">● 13,105 Live Verified Events in MongoDB Atlas</span>
+          </div>
+
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px;">
+            <div style="background:rgba(17,24,39,0.7); border:1px solid var(--border-card); border-radius:8px; padding:16px;">
+              <div style="font-size:0.86rem; font-weight:700; color:#10b981; margin-bottom:6px;">✔ VERIFIED THREAT Criteria</div>
+              <p style="font-size:0.78rem; color:var(--text-secondary); line-height:1.5;">
+                Matched against authentic live event reports and indicators from CISA KEV, abuse.ch (ThreatFox, URLhaus), CIRCL OSINT, Botvrij.eu, and VirusTotal v3.
+              </p>
+            </div>
+            <div style="background:rgba(17,24,39,0.7); border:1px solid var(--border-card); border-radius:8px; padding:16px;">
+              <div style="font-size:0.86rem; font-weight:700; color:#fb7185; margin-bottom:6px;">✖ NOT VERIFIED Status</div>
+              <p style="font-size:0.78rem; color:var(--text-secondary); line-height:1.5;">
+                Indicates the target has not yet been seen in authenticated OSINT feeds. You can immediately trigger a multi-engine live VirusTotal scan to ingest and verify it.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <!-- ARTICLE DETAIL INSPECTION MODAL -->
+  <div id="reportDetailModal" class="modal-backdrop">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modalReportTitle" style="font-size:1.05rem; font-weight:700; color:#fff;">Threat Report Inspection</h3>
+        <button id="modalCloseBtn" class="modal-close-btn">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Report ID:</span>
+            <strong id="modalReportId" style="font-family:var(--font-mono); color:var(--accent-cyan); margin-left:6px;"></strong>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <a id="modalVerifiedSourceBtn" class="btn-modal-source" href="#" target="_blank" style="display:none;">
+              🔗 Open Official Verified Source
+            </a>
+            <span id="modalSeverity" class="badge-severity"></span>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; background:#0a0d14; padding:12px; border-radius:6px; border:1px solid var(--border-card);">
+          <div>
+            <span style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">Source / Publisher:</span>
+            <div id="modalSource" style="font-size:0.84rem; font-weight:600; color:#fff; margin-top:2px;"></div>
+          </div>
+          <div>
+            <span style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">Category:</span>
+            <div id="modalThreatType" style="font-size:0.84rem; font-weight:600; color:var(--accent-blue); margin-top:2px;"></div>
+          </div>
+          <div>
+            <span style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">Organization:</span>
+            <div id="modalOrg" style="font-size:0.84rem; color:var(--text-secondary); margin-top:2px;"></div>
+          </div>
+          <div>
+            <span style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase;">Captured Date:</span>
+            <div id="modalCreatedDate" style="font-size:0.84rem; font-family:var(--font-mono); color:var(--text-secondary); margin-top:2px;"></div>
+          </div>
+        </div>
+
+        <div>
+          <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:6px;">Intelligence Summary</span>
+          <p id="modalDescription" style="font-size:0.86rem; color:var(--text-secondary); line-height:1.6;"></p>
+        </div>
+
+        <div>
+          <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:8px;">Embedded BSON Indicators (~2 KB Payload)</span>
+          <pre id="modalRawData" class="json-preview"></pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
